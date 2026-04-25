@@ -31,6 +31,10 @@ fn verify_sig_and_urls<let MAX_URL_LEN: u32, let NUM_REQUEST_URLS: u32, let NUM_
         // the byte-match assertions inside the branch will fail.
         let (found, url_index) = unsafe { get_allowed_url_index(request_urls[i], allowed_urls) };
         assert(found == true, "No allowed URL matches the request URL");
+        // Direct range gate on url_index so its dataflow edge to a constraint
+        // is obvious to noir's analyzer. The selector loop below then
+        // constrains *which* index it is.
+        assert(url_index < NUM_ALLOWED_URLS as u32, "url_index out of range");
 
         // Lift reads out of the conditional: iterate at compile-time-constant
         // `k` so every `allowed_urls[k]` is a comptime array access (no
