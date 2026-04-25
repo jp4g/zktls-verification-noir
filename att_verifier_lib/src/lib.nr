@@ -23,21 +23,43 @@ fn verify_sig_and_urls<let MAX_URL_LEN: u32, let NUM_REQUEST_URLS: u32, let NUM_
 
     let mut allowed_url_matches: [Field; NUM_REQUEST_URLS] = [0; NUM_REQUEST_URLS];
     for i in 0..NUM_REQUEST_URLS {
-        // Safety: find the allowed_url index unconstrained, then constrain it.
+        // Safety: the hint only supplies *which* allowed_url matched. The
+        // selector loop below constrains url_index via an equality gate
+        // (`k == url_index`) inside conditionals, which is the shape noir's
+        // brillig-subgraph analyzer follows. If the hint lied, either
+        // selector_sum != 1 (caught by the `assert(selector_sum == 1)`) or
+        // the byte-match assertions inside the branch will fail.
         let (found, url_index) = unsafe { get_allowed_url_index(request_urls[i], allowed_urls) };
         assert(found == true, "No allowed URL matches the request URL");
-        let allowed_url = allowed_urls[url_index];
-        for j in 0..MAX_URL_LEN {
-            if j < allowed_url.len() {
-                assert_eq(request_urls[i].storage()[j], allowed_url.storage()[j], "URL check failed");
-            }
-        }
+
+        // Lift reads out of the conditional: iterate at compile-time-constant
+        // `k` so every `allowed_urls[k]` is a comptime array access (no
+        // dynamic-index mux); do the constraints/writes INSIDE the
+        // `if k == url_index` branch. Materializing a mux'd `allowed_url`
+        // across the whole BoundedVec (as upstream did) is ~NUM_ALLOWED_URLS *
+        // MAX_URL_LEN muxes we never need.
         let mut hash_input: [Field; MAX_URL_LEN] = [0; MAX_URL_LEN];
-        for j in 0..MAX_URL_LEN {
-            if j < allowed_url.len() {
-                hash_input[j] = allowed_url.storage()[j] as Field;
+        let mut selector_sum: u32 = 0;
+        for k in 0..NUM_ALLOWED_URLS {
+            // Comptime array read (k is const in the unrolled loop).
+            let candidate = allowed_urls[k];
+            let candidate_len = candidate.len();
+            let candidate_bytes = candidate.storage();
+            if (k as u32) == url_index {
+                selector_sum = selector_sum + 1;
+                for j in 0..MAX_URL_LEN {
+                    if j < candidate_len {
+                        assert_eq(
+                            request_urls[i].storage()[j],
+                            candidate_bytes[j],
+                            "URL check failed",
+                        );
+                        hash_input[j] = candidate_bytes[j] as Field;
+                    }
+                }
             }
         }
+        assert(selector_sum == 1, "url_index out of range");
         allowed_url_matches[i] = Poseidon2::hash(hash_input, MAX_URL_LEN);
     }
     allowed_url_matches
