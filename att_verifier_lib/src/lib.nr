@@ -123,7 +123,7 @@ pub fn verify_attestation_hashing<let MAX_URL_LEN: u32, let N: u32, let MAX_CONT
         public_key_x, public_key_y, hash, signature, request_urls, allowed_urls
     );
     for i in 0..N {
-        let computed = sha256_var(contents[i].storage(), contents[i].len() as u64);
+        let computed = sha256_var(contents[i].storage(), contents[i].len() as u32);
         assert(computed == data_hashes[i]);
     }
     allowed_url_matches
